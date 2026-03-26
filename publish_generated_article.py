@@ -59,12 +59,15 @@ def publish_generated_article():
     escaped_url = article_url.replace('_', '\\_').replace('-', '\\-').replace('.', '\\.')
     escaped_title = escape_markdown_v2(title)
     
-    # Извлекаем первые 2-3 предложения для описания
+    # Извлекаем первые 1-2 предложения для описания (максимум 150 символов)
     description = ""
     for line in content.split('\n'):
         line = line.strip()
-        if line and not line.startswith('#') and not line.startswith('!'):
-            description = line[:200]  # Первые 200 символов
+        if line and not line.startswith('#') and not line.startswith('!') and not line.startswith('---'):
+            # Берём первые 150 символов и добавляем многоточие
+            description = line[:150]
+            if len(line) > 150:
+                description += '...'
             break
     
     escaped_description = escape_markdown_v2(description) if description else "AI-статья о технологиях"
