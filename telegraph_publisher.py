@@ -44,11 +44,14 @@ def create_telegraph_content(markdown_text, include_title=False):
     
     Telegra.ph использует Array of Node.
     Списки должны быть в ul/ol с li элементами.
+    Таблицы конвертируются в текст.
     
     Args:
         markdown_text: Текст в формате Markdown
-        include_title: Если False — пропускаем первый заголовок И первый параграф (Telegra.ph добавляет заголовок автоматически)
+        include_title: Если False — пропускаем первый заголовок и первый параграф
     """
+    import re
+    
     content = []
     lines = markdown_text.split('\n')
     
@@ -56,10 +59,16 @@ def create_telegraph_content(markdown_text, include_title=False):
     current_list = []
     in_list = False
     skip_first_h3 = not include_title
-    skip_first_paragraph = not include_title  # Пропускаем первый параграф (это описание под заголовком)
+    skip_first_paragraph = not include_title
     
-    for line in lines:
-        line = line.strip()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Пропускаем пустые строки в начале
+        if not line and not current_paragraph and not current_list:
+            i += 1
+            continue
         
         if not line:
             # Пустая строка - закрываем параграф и список
@@ -80,6 +89,61 @@ def create_telegraph_content(markdown_text, include_title=False):
                 })
                 current_list = []
                 in_list = False
+            i += 1
+            continue
+        
+        # Таблицы Markdown (| col | col |)
+        if line.startswith('|') and '|' in line[1:]:
+            # Закрываем предыдущие элементы
+            if current_paragraph:
+                content.append({
+                    "tag": "p",
+                    "children": [" ".join(current_paragraph)]
+                })
+                current_paragraph = []
+            if in_list and current_list:
+                content.append({
+                    "tag": "ul",
+                    "children": current_list
+                })
+                current_list = []
+                in_list = False
+            
+            # Собираем все строки таблицы
+            table_rows = []
+            header_row = None
+            while i < len(lines) and lines[i].strip().startswith('|'):
+                row_line = lines[i].strip()
+                # Пропускаем разделитель |---|---|
+                if re.match(r'\|[\s\-:|]+\|', row_line):
+                    i += 1
+                    continue
+                # Разбираем ячейки
+                cells = [cell.strip() for cell in row_line.split('|')[1:-1]]
+                if cells:
+                    if header_row is None:
+                        header_row = cells
+                    else:
+                        table_rows.append(cells)
+                i += 1
+            
+            # Конвертируем таблицу в форматированный текст
+            if header_row or table_rows:
+                # Первая строка — заголовок (жирный)
+                if header_row:
+                    header_text = " | ".join(header_row)
+                    content.append({
+                        "tag": "p",
+                        "children": [{"tag": "b", "children": [header_text]}]
+                    })
+                
+                # Остальные строки
+                for row in table_rows:
+                    row_text = " | ".join(row)
+                    content.append({
+                        "tag": "p",
+                        "children": [row_text]
+                    })
             continue
         
         # Заголовки
@@ -87,6 +151,7 @@ def create_telegraph_content(markdown_text, include_title=False):
             # Пропускаем первый заголовок (это заголовок статьи)
             if skip_first_h3:
                 skip_first_h3 = False
+                i += 1
                 continue
             
             # Закрываем предыдущие элементы
@@ -155,6 +220,7 @@ def create_telegraph_content(markdown_text, include_title=False):
             })
         # Код
         elif line.startswith('```'):
+            i += 1
             continue
         # Цитаты
         elif line.startswith('> '):
@@ -179,17 +245,17 @@ def create_telegraph_content(markdown_text, include_title=False):
         # Обычный текст
         else:
             # Обработка inline форматирования
-            # Telegra.ph требует отдельные узлы для форматирования, не HTML!
+            text = line
             
-            import re
+            # Жирный **текст** → отдельный узел
+            # Курсив _текст_ → отдельный узел
+            # Код `текст` → отдельный узел
+            # Ссылки [текст](url) → отдельный узел
             
-            def process_inline_formatting(text):
-                """
-                Разбить текст на узлы с форматированием.
-                Возвращает список строк и узлов.
-                """
+            def process_inline_formatting(txt):
+                import re
                 parts = []
-                remaining = text
+                remaining = txt
                 
                 # Обрабатываем **жирный**
                 if '**' in remaining:
@@ -288,6 +354,8 @@ def create_telegraph_content(markdown_text, include_title=False):
             else:
                 # Простой текст
                 current_paragraph.append("".join(parts))
+        
+        i += 1
     
     # Добавляем оставшиеся элементы
     if current_paragraph:
