@@ -59,20 +59,37 @@ def publish_generated_article():
     # URL НЕ экранируем — Telegram сам разберётся
     escaped_title = escape_markdown_v2(title)
     
-    # Отправляем ПОЛНЫЙ текст статьи в Telegram
+    # Отправляем текст статьи в Telegram
     full_text = content.strip()
     
     # Преобразуем Markdown заголовки (#, ##, ###) в жирный текст
     import re
     full_text = re.sub(r'^#{1,3}\s+(.+)$', r'*\1*', full_text, flags=re.MULTILINE)
     
-    # НЕ экранируем полный текст — qwen генерирует чистый Markdown
-    # Экранируем только то, что добавляем сами
-    escaped_full_text = full_text  # Без экранирования!
+    # Извлекаем первые 2-3 абзаца для анонса (после заголовка)
+    lines = full_text.split('\n')
+    description_lines = []
+    paragraph_count = 0
     
-    # Формируем анонс: заголовок + полный текст + ссылка
-    telegraph_link = f"📖 [Читать на Telegra.ph]({article_url})"
-    announcement = f"🤖 *{escaped_title}*\n\n{escaped_full_text}\n\n{telegraph_link}\n\n\\#ai \\#технологии"
+    for line in lines:
+        line = line.strip()
+        # Пропускаем заголовки и пустые строки
+        if not line or line.startswith('*') or line.startswith('---'):
+            continue
+        # Берём первые 3 непустых абзаца
+        if line and not line.startswith('#'):
+            description_lines.append(line)
+            paragraph_count += 1
+            if paragraph_count >= 3:
+                break
+    
+    description = '\n\n'.join(description_lines)
+    
+    # Формируем анонс: заголовок + краткое описание + хэштеги
+    # Ссылка на Telegra.ph прикрепится автоматически как preview
+    # Экранируем всё для MarkdownV2
+    escaped_description = escape_markdown_v2(description)
+    announcement = f"*{escaped_title}*\n\n{escaped_description}\n\n\\#ai \\#технологии \\#новости"
     
     # Публикуем в Telegram
     config = json.load(open('/root/git/AI-journalist-bot/config.json'))
@@ -81,58 +98,26 @@ def publish_generated_article():
     
     tg_url = f'https://api.telegram.org/bot{token}/sendMessage'
     
-    # Отладка: покажем первые 500 символов анонса
-    print(f"\n📝 Анонс (первые 500 символов):\n{announcement[:500]}")
-    print(f"🔍 URL: {article_url}")
+    # Отправляем анонс с link preview на Telegra.ph
+    # Экранируем URL для MarkdownV2
+    escaped_url = article_url.replace('_', '\\_').replace('-', '\\-').replace('.', '\\.')
     
-    # Если статья длинная — разбиваем на части
-    max_length = 4000  # Telegram лимит 4096, оставляем запас
-    chunks = []
+    tg_data = {
+        'chat_id': channel_id,
+        'text': announcement + f"\n\n📖 [Читать полностью]({escaped_url})",
+        'parse_mode': 'MarkdownV2'
+    }
     
-    if len(announcement) <= max_length:
-        chunks = [announcement]
-    else:
-        # Разбиваем на части по абзацам
-        parts = announcement.split('\n\n')
-        current_chunk = ""
-        
-        for part in parts:
-            if len(current_chunk) + len(part) + 2 <= max_length:
-                current_chunk += part + '\n\n'
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = part + '\n\n'
-        
-        if current_chunk:
-            chunks.append(current_chunk.strip())
+    tg_result = requests.post(tg_url, json=tg_data)
+    tg_result_json = tg_result.json()
     
-    # Отправляем все части
     msg_id = None
-    for i, chunk in enumerate(chunks):
-        tg_data = {
-            'chat_id': channel_id,
-            'text': chunk,
-            'parse_mode': 'MarkdownV2'
-        }
-        
-        # Для второй и последующих частей — reply на первую
-        if i > 0 and msg_id:
-            tg_data['reply_parameters'] = {'message_id': msg_id}
-        
-        tg_result = requests.post(tg_url, json=tg_data)
-        tg_result_json = tg_result.json()
-        
-        if tg_result_json.get('ok'):
-            msg_id = tg_result_json['result']['message_id']
-            if i == 0:
-                print(f"✅ Анонс опубликован! Message ID {msg_id}")
-            else:
-                print(f"✅ Часть {i+1} опубликована")
-        else:
-            print(f"⚠️ Ошибка Telegram: {tg_result_json.get('description', 'Неизвестно')}")
-            if i == 0:
-                msg_id = None  # Если первая часть не отправлена
+    if tg_result_json.get('ok'):
+        msg_id = tg_result_json['result']['message_id']
+        print(f"✅ Анонс опубликован! Message ID {msg_id}")
+    else:
+        print(f"⚠️ Ошибка Telegram: {tg_result_json.get('description', 'Неизвестно')}")
+        msg_id = None
     
     # Запись в историю
     print("\n📝 Запись в историю...")
