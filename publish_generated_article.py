@@ -56,17 +56,23 @@ def publish_generated_article():
     print(f"✅ Опубликовано: {article_url}")
     
     # Создаём анонс с полным текстом статьи
-    escaped_url = article_url.replace('_', '\\_').replace('-', '\\-').replace('.', '\\.')
+    # URL НЕ экранируем — Telegram сам разберётся
     escaped_title = escape_markdown_v2(title)
     
     # Отправляем ПОЛНЫЙ текст статьи в Telegram
     full_text = content.strip()
     
-    # Экранируем специальные символы для Markdown V2
-    escaped_full_text = escape_markdown_v2(full_text)
+    # Преобразуем Markdown заголовки (#, ##, ###) в жирный текст
+    import re
+    full_text = re.sub(r'^#{1,3}\s+(.+)$', r'*\1*', full_text, flags=re.MULTILINE)
+    
+    # НЕ экранируем полный текст — qwen генерирует чистый Markdown
+    # Экранируем только то, что добавляем сами
+    escaped_full_text = full_text  # Без экранирования!
     
     # Формируем анонс: заголовок + полный текст + ссылка
-    announcement = f"🤖 *{escaped_title}*\n\n{escaped_full_text}\n\n📖 [Читать на Telegra.ph]({escaped_url})\n\n#ai #технологии"
+    telegraph_link = f"📖 [Читать на Telegra.ph]({article_url})"
+    announcement = f"🤖 *{escaped_title}*\n\n{escaped_full_text}\n\n{telegraph_link}\n\n\\#ai \\#технологии"
     
     # Публикуем в Telegram
     config = json.load(open('/root/git/AI-journalist-bot/config.json'))
@@ -74,6 +80,10 @@ def publish_generated_article():
     channel_id = config['channel_id']
     
     tg_url = f'https://api.telegram.org/bot{token}/sendMessage'
+    
+    # Отладка: покажем первые 500 символов анонса
+    print(f"\n📝 Анонс (первые 500 символов):\n{announcement[:500]}")
+    print(f"🔍 URL: {article_url}")
     
     # Если статья длинная — разбиваем на части
     max_length = 4000  # Telegram лимит 4096, оставляем запас
